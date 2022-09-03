@@ -622,6 +622,7 @@ impl frame_system::offchain::AppCrypto<<Signature as Verify>::Signer, Signature>
 
 parameter_types! {
 	   pub const OctopusAppchainPalletId: PalletId = PalletId(*b"py/octps");
+	   pub const RoomPalletId: PalletId = PalletId(*b"app/room");
 	   pub const GracePeriod: u32 = 10;
 	   pub const UnsignedPriority: u64 = 1 << 21;
 	   pub const RequestEventLimit: u32 = 10;
@@ -693,7 +694,10 @@ impl pallet_template::Config for Runtime {
 /// Configure the pallet-room in pallets/room.
 impl pallet_room::Config for Runtime {
 	type Event = Event;
-	type RoomTime = Timestamp;
+	// type RoomTime = Timestamp;
+	type PalletId = RoomPalletId;
+
+	type Currency = Balances;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

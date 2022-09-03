@@ -2,8 +2,8 @@ use appchain_barnacle_runtime::{
 	currency::{OCTS, UNITS as BEAT},
 	opaque::{Block, SessionKeys},
 	AccountId, BabeConfig, Balance, BalancesConfig, GenesisConfig, GrandpaConfig, ImOnlineConfig,
-	OctopusAppchainConfig, OctopusLposConfig, SessionConfig, Signature, SudoConfig, SystemConfig,
-	WASM_BINARY,
+	OctopusAppchainConfig, OctopusAssetsConfig, OctopusLposConfig, SessionConfig, Signature,
+	SudoConfig, SystemConfig, WASM_BINARY,
 };
 use beefy_primitives::crypto::AuthorityId as BeefyId;
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
@@ -292,6 +292,19 @@ fn testnet_genesis(
 			premined_amount: appchain_config.2,
 		},
 		octopus_lpos: OctopusLposConfig { era_payout: appchain_config.3, ..Default::default() },
-		octopus_assets: Default::default(),
+		octopus_assets: OctopusAssetsConfig {
+			assets: vec![
+				// id, owner, is_sufficient, min_balance
+				(0, get_account_id_from_seed::<sr25519::Public>("Alice"), true, 1),
+			],
+			metadata: vec![
+				// id, name, symbol, decimals
+				(0, "Gift Token".into(), "GIFT".into(), 10),
+			],
+			accounts: vec![
+				// id, account_id, balance
+				(0, get_account_id_from_seed::<sr25519::Public>("Alice"), 10_000_000),
+			],
+		},
 	}
 }

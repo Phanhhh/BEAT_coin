@@ -16,11 +16,17 @@ pub use pallet::*;
 
 use frame_support::inherent::Vec;
 use frame_support::pallet_prelude::*;
+use frame_support::sp_runtime::traits::{AccountIdConversion, Saturating};
 use frame_support::sp_runtime::SaturatedConversion;
-use frame_support::traits::Time;
+use frame_support::traits::{Currency, ExistenceRequirement::KeepAlive, Get, ReservableCurrency};
+use frame_support::weights;
+use frame_support::PalletId;
 use frame_system::pallet_prelude::*;
 
 pub type Id = u32;
+
+type BalanceOf<T> =
+	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -32,9 +38,10 @@ pub mod pallet {
 	pub struct Room<T: Config> {
 		creator: T::AccountId,
 		id_room: Id,
-		num_days: u64,
-		end_date: u64,
-		total_value: u128,
+		start: T::BlockNumber,
+		length: T::BlockNumber,
+		delay: T::BlockNumber,
+		total_value: BalanceOf<T>,
 		is_started: bool,
 		is_ended: bool,
 	}
@@ -44,7 +51,14 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
-		type RoomTime: Time;
+		// type RoomTime: Time;
+
+		/// The Room's pallet id
+		#[pallet::constant]
+		type PalletId: Get<PalletId>;
+
+		/// The currency trait.
+		type Currency: ReservableCurrency<Self::AccountId>;
 	}
 
 	#[pallet::pallet]
@@ -73,7 +87,13 @@ pub mod pallet {
 	#[pallet::storage]
 	#[pallet::getter(fn get_deposit)]
 	pub(super) type UserDeposit<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, u128, OptionQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, u32, OptionQuery>;
+
+	// Result data of user in room
+	#[pallet::storage]
+	#[pallet::getter(fn get_user_result)]
+	pub(super) type UserResult<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, u32, OptionQuery>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://docs.substrate.io/v3/runtime/events-and-errors
@@ -101,6 +121,19 @@ pub mod pallet {
 		UserAlreadyJoined,
 	}
 
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn on_initialize(n: T::BlockNumber) -> u64 {
+			let id_room = Rooms::<T>::iter_keys().collect::<Vec<u32>>();
+			for id in id_room {
+				let room = Rooms::<T>::get(id).unwrap();
+				let payout_block =
+					room.start.saturating_add(room.length).saturating_add(room.delay);
+				if payout_block <= n && room.is_started && !room.is_ended {}
+			}
+			0
+		}
+	}
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
@@ -109,8 +142,9 @@ pub mod pallet {
 		#[pallet::weight(0)]
 		pub fn create_new_room(
 			origin: OriginFor<T>,
-			num_days: u64,
-			deposit: u128,
+			length: T::BlockNumber,
+			delay: T::BlockNumber,
+			deposit: u32,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -120,9 +154,9 @@ pub mod pallet {
 			<RoomId<T>>::put(current_id_room);
 
 			// let start = T::RoomTime::now().saturated_into::<u64>();
+			let start = frame_system::Pallet::<T>::block_number();
 
 			// let end = start + num_days * 86_400;
-
 			// let mut current_number = <NumberUser<T>>::get();
 			// current_number += 1;
 			// <NumberUser<T>>::put(current_number);
@@ -133,15 +167,18 @@ pub mod pallet {
 			let room = Room::<T> {
 				creator: who.clone(),
 				id_room: current_id_room,
-				num_days,
-				end_date: 0,
-				total_value: deposit,
+				start,
+				length,
+				delay,
+				total_value: deposit.into(),
 				is_started: false,
 				is_ended: false,
 			};
 
 			let mut vec_users = Vec::new();
 			vec_users.push(who.clone());
+
+			T::Currency::transfer(&who, &Self::account_id(), deposit.saturated_into(), KeepAlive)?;
 
 			<UserInRoom<T>>::insert(current_id_room, vec_users);
 			<UserDeposit<T>>::insert(who.clone(), deposit);
@@ -151,7 +188,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn join_room(origin: OriginFor<T>, id_room: u32, deposit: u128) -> DispatchResult {
+		pub fn join_room(origin: OriginFor<T>, id_room: u32, deposit: u32) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			// Check if the room exists or not
@@ -166,6 +203,8 @@ pub mod pallet {
 			ensure!(!room.is_started, Error::<T>::RoomAlreadyStarted);
 			ensure!(!room.is_ended, Error::<T>::RoomAlreadyEnded);
 
+			room.total_value += deposit.saturated_into();
+
 			// Update infomation
 			let mut vec_users = UserInRoom::<T>::get(id_room).unwrap();
 			vec_users.push(who.clone());
@@ -173,15 +212,27 @@ pub mod pallet {
 			<UserInRoom<T>>::insert(id_room, vec_users.clone());
 			<UserDeposit<T>>::insert(who.clone(), deposit);
 
+			T::Currency::transfer(&who, &Self::account_id(), deposit.saturated_into(), KeepAlive)?;
+
 			// If the number of users is 4, room will start
 			if (vec_users.len() as i32) == 4 {
 				room.is_started = true;
-				let end = T::RoomTime::now().saturated_into::<u64>() + room.num_days * 86_400_000;
-				room.end_date = end;
-				<Rooms<T>>::insert(id_room, room);
+				let start = frame_system::Pallet::<T>::block_number();
+				room.start = start;
 			}
+			<Rooms<T>>::insert(id_room, room);
 
 			Ok(())
 		}
+	}
+}
+
+impl<T: Config> Pallet<T> {
+	/// The account ID of the room pot.
+	///
+	/// This actually does computation. If you need to keep using it, then make sure you cache the
+	/// value and only call this once.
+	pub fn account_id() -> T::AccountId {
+		T::PalletId::get().into_account()
 	}
 }
