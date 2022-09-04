@@ -2,8 +2,8 @@ use appchain_barnacle_runtime::{
 	currency::{OCTS, UNITS as BEAT},
 	opaque::{Block, SessionKeys},
 	AccountId, BabeConfig, Balance, BalancesConfig, GenesisConfig, GrandpaConfig, ImOnlineConfig,
-	OctopusAppchainConfig, OctopusAssetsConfig, OctopusLposConfig, SessionConfig, Signature,
-	SudoConfig, SystemConfig, WASM_BINARY,
+	OctopusAppchainConfig, OctopusAssetsConfig, OctopusLposConfig, RoomModuleConfig, SessionConfig,
+	Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };
 use beefy_primitives::crypto::AuthorityId as BeefyId;
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
@@ -127,8 +127,8 @@ pub fn development_config() -> Result<ChainSpec, String> {
 				get_account_id_from_seed::<sr25519::Public>("Alice"),
 				// Pre-funded accounts
 				Some(vec![
-					(get_account_id_from_seed::<sr25519::Public>("Alice"), 12_500_000 * BEAT),
-					(get_account_id_from_seed::<sr25519::Public>("Bob"), 10_000_000 * BEAT),
+					(get_account_id_from_seed::<sr25519::Public>("Alice"), 1_000 * BEAT),
+					(get_account_id_from_seed::<sr25519::Public>("Bob"), 1_000 * BEAT),
 				]),
 				// Appchain config
 				appchain_config(
@@ -304,6 +304,14 @@ fn testnet_genesis(
 			accounts: vec![
 				// id, account_id, balance
 				(0, get_account_id_from_seed::<sr25519::Public>("Alice"), 10_000_000),
+			],
+		},
+		room_module: RoomModuleConfig {
+			results: vec![
+				(get_account_id_from_seed::<sr25519::Public>("Alice"), 90),
+				(get_account_id_from_seed::<sr25519::Public>("Bob"), 50),
+				(get_account_id_from_seed::<sr25519::Public>("Charlie"), 100),
+				(get_account_id_from_seed::<sr25519::Public>("Dave"), 70),
 			],
 		},
 	}

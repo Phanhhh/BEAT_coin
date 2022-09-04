@@ -18,6 +18,7 @@ frame_support::construct_runtime!(
 		UncheckedExtrinsic = UncheckedExtrinsic,
 	{
 		System: frame_system::{Pallet, Call, Config, Storage, Event<T>},
+		Room: pallet_room::{Pallet, Call, Storage, Event<T>},
 		TemplateModule: pallet_template::{Pallet, Call, Storage, Event<T>},
 	}
 );
@@ -53,7 +54,14 @@ impl pallet_template::Config for Test {
 	type Event = Event;
 }
 
+impl pallet_room::Config for Test {
+	type Event = Event;
+	type Currency = Balances;
+	type PalletId: Get<RoomPalletId>;
+}
+
 // Build genesis storage according to the mock runtime.
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	system::GenesisConfig::default().build_storage::<Test>().unwrap().into()
 }
+pub const RoomPalletId: PalletId = PalletId(*b"app/room");

@@ -19,7 +19,6 @@ use frame_support::pallet_prelude::*;
 use frame_support::sp_runtime::traits::{AccountIdConversion, Saturating};
 use frame_support::sp_runtime::SaturatedConversion;
 use frame_support::traits::{Currency, ExistenceRequirement::KeepAlive, Get, ReservableCurrency};
-use frame_support::weights;
 use frame_support::PalletId;
 use frame_system::pallet_prelude::*;
 
@@ -67,7 +66,7 @@ pub mod pallet {
 	pub struct Pallet<T>(_);
 
 	#[pallet::storage]
-	pub(crate) type RoomId<T> = StorageValue<_, u32, ValueQuery>;
+	pub(crate) type RoomId<T> = StorageValue<_, Id, ValueQuery>;
 
 	// #[pallet::storage]
 	// pub(crate) type NumberUser<T> = StorageValue<_, u32, ValueQuery>;
@@ -75,19 +74,19 @@ pub mod pallet {
 	// Room index and information of room
 	#[pallet::storage]
 	#[pallet::getter(fn get_room)]
-	pub(super) type Rooms<T: Config> = StorageMap<_, Blake2_128Concat, u32, Room<T>, OptionQuery>;
+	pub(super) type Rooms<T: Config> = StorageMap<_, Blake2_128Concat, Id, Room<T>, OptionQuery>;
 
 	// Users who have joined in room (id_room, balance deposit)
 	#[pallet::storage]
 	#[pallet::getter(fn get_user_in_room)]
 	pub(super) type UserInRoom<T: Config> =
-		StorageMap<_, Blake2_128Concat, u32, Vec<T::AccountId>, OptionQuery>;
+		StorageMap<_, Blake2_128Concat, Id, Vec<T::AccountId>, OptionQuery>;
 
 	// Value which users have deposited
 	#[pallet::storage]
 	#[pallet::getter(fn get_deposit)]
 	pub(super) type UserDeposit<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, u32, OptionQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>, OptionQuery>;
 
 	// Result data of user in room
 	#[pallet::storage]
@@ -103,7 +102,7 @@ pub mod pallet {
 		/// Create new room (id_room, who)
 		CreateRoom { id_room: u32, creator: T::AccountId },
 		/// Who join in room (id_room, who, amount deposited)
-		JoinRoom { id_room: u32, user: T::AccountId, deposit_amount: u128 },
+		JoinRoom { id_room: u32, user: T::AccountId, deposit_amount: u32 },
 	}
 
 	// Errors inform users that something went wrong.
@@ -121,15 +120,61 @@ pub mod pallet {
 		UserAlreadyJoined,
 	}
 
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub results: Vec<(T::AccountId, u32)>,
+	}
+
+	#[cfg(feature = "std")]
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> GenesisConfig<T> {
+			GenesisConfig { results: Vec::default() }
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+		fn build(&self) {
+			for (account, result) in self.results.iter() {
+				UserResult::<T>::insert(account, result);
+			}
+		}
+	}
+
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: T::BlockNumber) -> u64 {
 			let id_room = Rooms::<T>::iter_keys().collect::<Vec<u32>>();
 			for id in id_room {
-				let room = Rooms::<T>::get(id).unwrap();
+				let mut room = Rooms::<T>::get(id).unwrap();
 				let payout_block =
 					room.start.saturating_add(room.length).saturating_add(room.delay);
-				if payout_block <= n && room.is_started && !room.is_ended {}
+				let vec_users = UserInRoom::<T>::get(id).unwrap();
+				if payout_block <= n && room.is_started && !room.is_ended {
+					room.is_ended = true;
+					for user in vec_users {
+						let result = UserResult::<T>::get(user.clone()).unwrap();
+						let deposit = UserDeposit::<T>::get(user.clone()).unwrap();
+						// Rewards depend on result of users: factor(BEAT token, bonus token)
+						let reward: (u128, u128) = match result {
+							x if x > 95 && x <= 100 => (100, 100),
+							x if x > 85 && x <= 95 => (90, 90),
+							x if x > 75 && x <= 85 => (80, 80),
+							x if x > 65 && x <= 75 => (70, 70),
+							x if x > 55 && x <= 65 => (60, 60),
+							x if x > 45 && x <= 55 => (50, 50),
+							_ => (0, 0),
+						};
+						let reward_beat = deposit.saturated_into::<u128>() * reward.0 / 100;
+						let res = T::Currency::transfer(
+							&Self::account_id(),
+							&user,
+							reward_beat.saturated_into(),
+							KeepAlive,
+						);
+						debug_assert!(res.is_ok());
+					}
+				}
 			}
 			0
 		}
@@ -144,7 +189,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			length: T::BlockNumber,
 			delay: T::BlockNumber,
-			deposit: u32,
+			deposit: BalanceOf<T>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -170,11 +215,11 @@ pub mod pallet {
 				start,
 				length,
 				delay,
-				total_value: deposit.into(),
+				total_value: deposit.saturated_into(),
 				is_started: false,
 				is_ended: false,
 			};
-
+			let deposit = deposit;
 			let mut vec_users = Vec::new();
 			vec_users.push(who.clone());
 
@@ -188,7 +233,11 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn join_room(origin: OriginFor<T>, id_room: u32, deposit: u32) -> DispatchResult {
+		pub fn join_room(
+			origin: OriginFor<T>,
+			id_room: u32,
+			deposit: BalanceOf<T>,
+		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			// Check if the room exists or not
@@ -214,8 +263,8 @@ pub mod pallet {
 
 			T::Currency::transfer(&who, &Self::account_id(), deposit.saturated_into(), KeepAlive)?;
 
-			// If the number of users is 4, room will start
-			if (vec_users.len() as i32) == 4 {
+			// If the number of users is 2, room will start
+			if (vec_users.len() as i32) == 2 {
 				room.is_started = true;
 				let start = frame_system::Pallet::<T>::block_number();
 				room.start = start;
