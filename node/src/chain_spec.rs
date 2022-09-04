@@ -129,6 +129,8 @@ pub fn development_config() -> Result<ChainSpec, String> {
 				Some(vec![
 					(get_account_id_from_seed::<sr25519::Public>("Alice"), 1_000 * BEAT),
 					(get_account_id_from_seed::<sr25519::Public>("Bob"), 1_000 * BEAT),
+					(get_account_id_from_seed::<sr25519::Public>("Charlie"), 1_000 * BEAT),
+					(get_account_id_from_seed::<sr25519::Public>("Dave"), 1_000 * BEAT),
 				]),
 				// Appchain config
 				appchain_config(

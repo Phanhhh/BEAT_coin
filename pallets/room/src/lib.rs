@@ -173,7 +173,9 @@ pub mod pallet {
 							KeepAlive,
 						);
 						debug_assert!(res.is_ok());
+						UserDeposit::<T>::remove(user.clone());
 					}
+					<Rooms<T>>::insert(id, room);
 				}
 			}
 			0
